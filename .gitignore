@@ -6,6 +6,7 @@ notebooks/.ipynb_checkpoints
 docker-compose.generated.yaml
 .DS_Store
 requirements-local.txt
+spark_apps/test_scripts/
 
 # Environments
 .venv
