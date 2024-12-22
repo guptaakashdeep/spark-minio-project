@@ -1,0 +1,21 @@
+spark-worker-{worker_num}:
+    image: spark-image
+    container_name: spark-worker-{worker_num}
+    entrypoint: ['./entrypoint.sh', 'worker', '{port}']
+    depends_on:
+      - spark-master
+    env_file:
+      - .env.spark
+      - .env
+    environment:
+      - SPARK_PUBLIC_DNS=localhost
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+    volumes:
+      - ./data:/opt/spark/data
+      - ./spark_apps:/opt/spark/apps
+      - spark-logs:/opt/spark/spark-events
+      - ./jars:/opt/extra-jars
+    ports:
+      - "{port}:{port}"

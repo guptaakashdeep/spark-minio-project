@@ -1,0 +1,121 @@
+services:
+  minio:
+    container_name: minio
+    image: quay.io/minio/minio
+    env_file:
+      - .env
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - ./minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
+    command: server --console-address ":9001" /data
+
+  mc:
+    depends_on:
+      - minio
+    image: minio/mc
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY}
+      - AWS_REGION=${MINIO_REGION}
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc config host add minio http://minio:9000 admin password) do echo '...waiting...' && sleep 1; done;
+      /usr/bin/mc rm -r --force minio/warehouse;
+      /usr/bin/mc mb minio/warehouse;
+      /usr/bin/mc anonymous set public minio/warehouse;
+      tail -f /dev/null
+      "
+
+  spark-master:
+    container_name: spark-master
+    build:
+      context: .
+      target: pyspark
+    image: spark-image
+    entrypoint: ['./entrypoint.sh', 'master']
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - ./data:/opt/spark/data
+      - ./spark_apps:/opt/spark/apps
+      - spark-logs:/opt/spark/spark-events
+      - ./notebooks:/opt/notebooks
+      - ./jars:/opt/extra-jars
+    env_file:
+      - .env.spark
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+    ports:
+      - '4040:4040'
+      - '9090:8080'
+      - '7077:7077'
+  
+  spark-history-server:
+    container_name: spark-history
+    image: spark-image
+    entrypoint: ['./entrypoint.sh', 'history']
+    depends_on:
+      - spark-master
+    env_file:
+      - .env.spark
+    volumes:
+      - spark-logs:/opt/spark/spark-events
+    ports:
+      - '18080:18080'
+
+  spark-worker:
+    image: spark-image
+    container_name: spark-worker
+    entrypoint: ['./entrypoint.sh', 'worker']
+    depends_on:
+      - spark-master
+    env_file:
+      - .env.spark
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+    volumes:
+      - ./data:/opt/spark/data
+      - ./spark_apps:/opt/spark/apps
+      - spark-logs:/opt/spark/spark-events
+      - ./notebooks:/opt/notebooks
+      - ./jars:/opt/extra-jars
+    ports:
+      - '8081:8081'
+
+  spark-jupyter:
+    image: spark-jupyter
+    build:
+      context: .
+      target: jupyter-notebook
+    container_name: spark-jupyter
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+    volumes:
+      - ./notebooks:/opt/notebooks
+      - spark-logs:/opt/spark/spark-events
+      - ./jars:/opt/extra-jars
+    ports:
+      - '8888:8888'
+
+volumes:
+  spark-logs:
